@@ -152,10 +152,22 @@ try {
     Import-Module ActiveDirectory -ErrorAction Stop
     
     # Get domain credentials from Key Vault
-    $domainCredential = Get-AzureKeyVaultCredential `
-        -VaultName $keyVaultName `
-        -UsernameSecretName "DomainAdminUsername" `
-        -PasswordSecretName "DomainAdminPassword"
+   # $domainCredential = Get-AzureKeyVaultCredential `
+   #     -VaultName $keyVaultName `
+   #     -UsernameSecretName "DomainAdminUsername" `
+   #     -PasswordSecretName "DomainAdminPassword"
+
+    # Get domain credentials from Automation Account
+    Write-Log "Retrieving credentials from Automation Account"
+    $domainCredential = Get-AutomationPSCredential -Name "DomainAdminCredential"
+
+    if ($null -eq $domainCredential) {
+        Write-Log "Failed to retrieve credentials from Automation Account" -Level ERROR
+    throw "Credential retrieval failed"
+        }
+
+    Write-Log "Credentials retrieved successfully" -Level SUCCESS
+
     
     # Check if gMSA already exists
     Write-Log "Checking if gMSA already exists: $accountName"
