@@ -171,7 +171,7 @@ try {
     
     # Check if gMSA already exists
     Write-Log "Checking if gMSA already exists: $accountName"
-    if (Test-gMSAExists -AccountName $accountName -Credential $domainCredential) {
+    if (Test-gMSAExists -AccountName $accountName ) {
         Write-Log "gMSA '$accountName' already exists" -Level WARNING
         
         # Return success but indicate it already exists
@@ -188,14 +188,14 @@ try {
     
     # Verify KDS Root Key exists (required for gMSA)
     Write-Log "Verifying KDS Root Key"
-    $kdsRootKey = Get-KdsRootKey -Credential $domainCredential | Select-Object -First 1
+    $kdsRootKey = Get-KdsRootKey  | Select-Object -First 1
     
     if ($null -eq $kdsRootKey) {
         Write-Log "No KDS Root Key found. Creating one..." -Level WARNING
         
         # Create KDS Root Key (use -EffectiveImmediately only in test environments)
         # In production, remove -EffectiveImmediately (10 hour wait required)
-        Add-KdsRootKey -EffectiveTime ((Get-Date).AddHours(-10)) -Credential $domainCredential
+        Add-KdsRootKey -EffectiveTime ((Get-Date).AddHours(-10)) 
         Write-Log "KDS Root Key created successfully" -Level SUCCESS
     }
     
@@ -241,7 +241,7 @@ try {
     
     # Verify creation
     Start-Sleep -Seconds 2
-    $createdAccount = Get-ADServiceAccount -Identity $accountName -Server $domainController -Credential $domainCredential -Properties *
+    $createdAccount = Get-ADServiceAccount -Identity $accountName -Server $domainController  -Properties *
     
     if ($null -eq $createdAccount) {
         Write-Log "Failed to verify gMSA creation" -Level ERROR
