@@ -193,6 +193,7 @@ jobs:
             -backend-config="key=okta-gmsa-automation.tfstate"
       
       - name: Download Terraform Plan
+        if: needs.terraform-plan.outputs.tfplanExitCode == '2'
         uses: actions/download-artifact@v4
         with:
           name: tfplan
@@ -208,7 +209,12 @@ jobs:
           TF_VAR_domain_admin_password: ${{ secrets.DOMAIN_ADMIN_PASSWORD }}
           TF_VAR_webhook_auth_token: ${{ secrets.WEBHOOK_AUTH_TOKEN }}
           TF_VAR_domain_controller: ${{ secrets.DOMAIN_CONTROLLER }}
-        run: terraform apply -auto-approve tfplan
+        run: |
+          if [ -f tfplan ]; then
+            terraform apply -auto-approve tfplan
+          else
+            terraform apply -auto-approve
+          fi
       
       - name: Get Webhook URI
         id: webhook
