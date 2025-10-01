@@ -27,14 +27,14 @@ $ErrorActionPreference = "Stop"
 $VerbosePreference = "Continue"
 
 # Azure Key Vault configuration
-$keyVaultName = "${key_vault_name}"
-$domainController = "${domain_controller}"
+#$keyVaultName = "${key_vault_name}"
+#$domainController = "${domain_controller}"
 
 # Import Azure modules
-Write-Output "Importing Azure PowerShell modules..."
-Import-Module Az.Accounts -ErrorAction Stop
-Import-Module Az.KeyVault -ErrorAction Stop
-Write-Output "Azure modules imported successfully"
+#Write-Output "Importing Azure PowerShell modules..."
+#Import-Module Az.Accounts -ErrorAction Stop
+#Import-Module Az.KeyVault -ErrorAction Stop
+#Write-Output "Azure modules imported successfully"
 
 # Log start
 Write-Output "=========================================="
@@ -83,40 +83,18 @@ function Test-gMSAExists {
     }
 }
 
-function Get-AzureKeyVaultCredential {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$VaultName,
-        
-        [Parameter(Mandatory = $true)]
-        [string]$UsernameSecretName,
-        
-        [Parameter(Mandatory = $true)]
-        [string]$PasswordSecretName
-    )
-    
-    try {
-        Write-Log "Retrieving credentials from Key Vault: $VaultName"
-        
-        # Connect using Managed Identity
-        Connect-AzAccount -Identity | Out-Null
-        
-        # Retrieve secrets
-        $username = Get-AzKeyVaultSecret -VaultName $VaultName -Name $UsernameSecretName -AsPlainText
-        $passwordSecret = Get-AzKeyVaultSecret -VaultName $VaultName -Name $PasswordSecretName
-        $password = $passwordSecret.SecretValue
-        
-        # Create credential object
-        $credential = New-Object System.Management.Automation.PSCredential($username, $password)
-        
-        Write-Log "Credentials retrieved successfully" -Level SUCCESS
-        return $credential
-    }
-    catch {
-        Write-Log "Failed to retrieve credentials from Key Vault: $($_.Exception.Message)" -Level ERROR
-        throw
-    }
+# Replace the entire Get-AzureKeyVaultCredential function and its usage with:
+
+# Get domain credentials from Automation Account
+Write-Log "Retrieving credentials from Automation Account"
+$domainCredential = Get-AutomationPSCredential -Name "DomainAdminCredential"
+
+if ($null -eq $domainCredential) {
+    Write-Log "Failed to retrieve credentials from Automation Account" -Level ERROR
+    throw "Credential retrieval failed"
 }
+
+Write-Log "Credentials retrieved successfully" -Level SUCCESS
 #endregion
 
 #region Main Execution
