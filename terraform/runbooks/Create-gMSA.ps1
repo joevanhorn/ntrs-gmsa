@@ -30,6 +30,12 @@ $VerbosePreference = "Continue"
 $keyVaultName = "${key_vault_name}"
 $domainController = "${domain_controller}"
 
+# Import Azure modules
+Write-Output "Importing Azure PowerShell modules..."
+Import-Module Az.Accounts -ErrorAction Stop
+Import-Module Az.KeyVault -ErrorAction Stop
+Write-Output "Azure modules imported successfully"
+
 # Log start
 Write-Output "=========================================="
 Write-Output "gMSA Creation Runbook Started"
