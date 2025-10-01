@@ -198,20 +198,6 @@ resource "azurerm_automation_runbook" "create_gmsa" {
   tags = var.tags
 }
 
-# Publish the Runbook
-resource "azurerm_automation_job_schedule" "publish" {
-  resource_group_name     = azurerm_resource_group.main.name
-  automation_account_name = azurerm_automation_account.main.name
-  runbook_name            = azurerm_automation_runbook.create_gmsa.name
-  
-  # This is a workaround to ensure the runbook is published
-  # The actual publishing happens through the runbook content update
-  
-  depends_on = [
-    azurerm_automation_runbook.create_gmsa
-  ]
-}
-
 # Hybrid Worker Group
 resource "azurerm_automation_hybrid_runbook_worker_group" "onprem" {
   name                    = var.hybrid_worker_group_name
