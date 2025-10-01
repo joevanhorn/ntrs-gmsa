@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     This runbook accepts a JSON payload from Okta Workflows via webhook and creates
-    a gMSA in Active Directory. It includes validation, error handling, and logging.
+    a gMSA in Active Directory using remote PowerShell execution on the domain controller.
 
 .PARAMETER WebhookData
     Automatically passed by Azure Automation when triggered via webhook
@@ -13,8 +13,8 @@
     Author: Azure Automation
     Requirements: 
     - Hybrid Runbook Worker on domain-joined server
-    - Active Directory PowerShell module
-    - Domain admin credentials stored in Azure Key Vault
+    - Domain admin credentials in Automation Account
+    - PowerShell remoting enabled on domain controller
 #>
 
 param(
@@ -26,15 +26,11 @@ param(
 $ErrorActionPreference = "Stop"
 $VerbosePreference = "Continue"
 
-# Azure Key Vault configuration
-#$keyVaultName = "${key_vault_name}"
-#$domainController = "${domain_controller}"
+# Domain controller configuration - Terraform substitutes this value
+$domainController = "${domain_controller}"
 
-# Import Azure modules
-#Write-Output "Importing Azure PowerShell modules..."
-#Import-Module Az.Accounts -ErrorAction Stop
-#Import-Module Az.KeyVault -ErrorAction Stop
-#Write-Output "Azure modules imported successfully"
+# Automation credential name
+$credentialName = "DomainAdminCredential"
 
 # Log start
 Write-Output "=========================================="
@@ -60,45 +56,24 @@ function Write-Log {
     switch ($Level) {
         'ERROR'   { Write-Error $logMessage }
         'WARNING' { Write-Warning $logMessage }
-        'SUCCESS' { Write-Output $logMessage }
         default   { Write-Output $logMessage }
     }
 }
-
-function Test-gMSAExists {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$AccountName,
-        
-        [Parameter(Mandatory = $true)]
-        [System.Management.Automation.PSCredential]$Credential
-    )
-    
-    try {
-        $account = Get-ADServiceAccount -Filter "Name -eq '$AccountName'" -Server $domainController -Credential $Credential -ErrorAction SilentlyContinue
-        return ($null -ne $account)
-    }
-    catch {
-        return $false
-    }
-}
-
-# Replace the entire Get-AzureKeyVaultCredential function and its usage with:
-
-# Get domain credentials from Automation Account
-Write-Log "Retrieving credentials from Automation Account"
-$domainCredential = Get-AutomationPSCredential -Name "DomainAdminCredential"
-
-if ($null -eq $domainCredential) {
-    Write-Log "Failed to retrieve credentials from Automation Account" -Level ERROR
-    throw "Credential retrieval failed"
-}
-
-Write-Log "Credentials retrieved successfully" -Level SUCCESS
 #endregion
 
 #region Main Execution
 try {
+    # Get domain credentials from Automation Account
+    Write-Log "Retrieving credentials from Automation Account"
+    $domainCredential = Get-AutomationPSCredential -Name $credentialName
+    
+    if ($null -eq $domainCredential) {
+        Write-Log "Failed to retrieve credentials from Automation Account" -Level ERROR
+        throw "Credential retrieval failed"
+    }
+    
+    Write-Log "Credentials retrieved successfully" -Level SUCCESS
+    
     # Validate webhook data
     if ($null -eq $WebhookData) {
         Write-Log "No webhook data received. This runbook must be triggered via webhook." -Level ERROR
@@ -106,17 +81,6 @@ try {
     }
     
     Write-Log "Webhook data received"
-    
-    # Optional: Validate webhook token for additional security
-    # Uncomment and configure if you want token-based authentication
-    <#
-    $expectedToken = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "WebhookToken" -AsPlainText
-    if ($WebhookData.RequestHeader["X-Auth-Token"] -ne $expectedToken) {
-        Write-Log "Invalid authentication token" -Level ERROR
-        throw "Unauthorized request"
-    }
-    Write-Log "Authentication token validated"
-    #>
     
     # Parse the request body
     Write-Log "Parsing request body"
@@ -128,8 +92,7 @@ try {
     $principalsAllowedToRetrieve = $requestBody.PrincipalsAllowedToRetrieve
     $description = $requestBody.Description
     $servicePrincipalNames = $requestBody.ServicePrincipalNames
-    $kdsRootKeyId = $requestBody.KdsRootKeyId  # Optional
-    $organizationalUnit = $requestBody.OrganizationalUnit  # Optional, e.g., "OU=ServiceAccounts,DC=contoso,DC=com"
+    $organizationalUnit = $requestBody.OrganizationalUnit
     
     # Validate required parameters
     if ([string]::IsNullOrWhiteSpace($accountName)) {
@@ -147,124 +110,103 @@ try {
     Write-Log "DNS Host Name: $dnsHostName"
     Write-Log "Description: $description"
     
-    # Import Active Directory module
-    Write-Log "Importing Active Directory module"
-    Import-Module ActiveDirectory -ErrorAction Stop
-    
-    # Get domain credentials from Key Vault
-   # $domainCredential = Get-AzureKeyVaultCredential `
-   #     -VaultName $keyVaultName `
-   #     -UsernameSecretName "DomainAdminUsername" `
-   #     -PasswordSecretName "DomainAdminPassword"
-
-    # Get domain credentials from Automation Account
-    Write-Log "Retrieving credentials from Automation Account"
-    $domainCredential = Get-AutomationPSCredential -Name "DomainAdminCredential"
-
-    if ($null -eq $domainCredential) {
-        Write-Log "Failed to retrieve credentials from Automation Account" -Level ERROR
-    throw "Credential retrieval failed"
-        }
-
-    Write-Log "Credentials retrieved successfully" -Level SUCCESS
-
-    
-    # Check if gMSA already exists
-    Write-Log "Checking if gMSA already exists: $accountName"
-    if (Test-gMSAExists -AccountName $accountName ) {
-        Write-Log "gMSA '$accountName' already exists" -Level WARNING
+    # Define the script block to execute on the domain controller
+    $scriptBlock = {
+        param(
+            [string]$AccountName,
+            [string]$DNSHostName,
+            [array]$PrincipalsAllowedToRetrieve,
+            [string]$Description,
+            [array]$ServicePrincipalNames,
+            [string]$OrganizationalUnit
+        )
         
-        # Return success but indicate it already exists
-        $result = @{
-            Status = "AlreadyExists"
-            AccountName = $accountName
-            Message = "gMSA already exists in Active Directory"
-            Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        # Import Active Directory module
+        Import-Module ActiveDirectory -ErrorAction Stop
+        
+        # Check if gMSA already exists
+        $existingAccount = Get-ADServiceAccount -Filter "Name -eq '$AccountName'" -ErrorAction SilentlyContinue
+        
+        if ($existingAccount) {
+            return @{
+                Status = "AlreadyExists"
+                AccountName = $AccountName
+                Message = "gMSA already exists in Active Directory"
+                DistinguishedName = $existingAccount.DistinguishedName
+            }
         }
         
-        Write-Output ($result | ConvertTo-Json)
-        return
-    }
-    
-    # Verify KDS Root Key exists (required for gMSA)
-    Write-Log "Verifying KDS Root Key"
-    $kdsRootKey = Get-KdsRootKey  | Select-Object -First 1
-    
-    if ($null -eq $kdsRootKey) {
-        Write-Log "No KDS Root Key found. Creating one..." -Level WARNING
+        # Verify KDS Root Key exists (required for gMSA)
+        $kdsRootKey = Get-KdsRootKey | Select-Object -First 1
         
-        # Create KDS Root Key (use -EffectiveImmediately only in test environments)
-        # In production, remove -EffectiveImmediately (10 hour wait required)
-        Add-KdsRootKey -EffectiveTime ((Get-Date).AddHours(-10)) 
-        Write-Log "KDS Root Key created successfully" -Level SUCCESS
+        if ($null -eq $kdsRootKey) {
+            # Create KDS Root Key with immediate effect (test/demo only)
+            # In production, remove -EffectiveImmediately for proper 10-hour replication
+            Add-KdsRootKey -EffectiveTime ((Get-Date).AddHours(-10)) | Out-Null
+        }
+        
+        # Build parameters for New-ADServiceAccount
+        $gmsaParams = @{
+            Name = $AccountName
+            DNSHostName = $DNSHostName
+            Enabled = $true
+        }
+        
+        # Add optional parameters
+        if (-not [string]::IsNullOrWhiteSpace($Description)) {
+            $gmsaParams['Description'] = $Description
+        }
+        
+        if ($null -ne $PrincipalsAllowedToRetrieve -and $PrincipalsAllowedToRetrieve.Count -gt 0) {
+            $gmsaParams['PrincipalsAllowedToRetrieveManagedPassword'] = $PrincipalsAllowedToRetrieve
+        }
+        
+        if ($null -ne $ServicePrincipalNames -and $ServicePrincipalNames.Count -gt 0) {
+            $gmsaParams['ServicePrincipalNames'] = $ServicePrincipalNames
+        }
+        
+        if (-not [string]::IsNullOrWhiteSpace($OrganizationalUnit)) {
+            $gmsaParams['Path'] = $OrganizationalUnit
+        }
+        
+        # Create the gMSA
+        New-ADServiceAccount @gmsaParams -ErrorAction Stop
+        
+        # Verify creation
+        Start-Sleep -Seconds 2
+        $createdAccount = Get-ADServiceAccount -Identity $AccountName -Properties * -ErrorAction Stop
+        
+        # Return success result
+        return @{
+            Status = "Success"
+            AccountName = $AccountName
+            DNSHostName = $DNSHostName
+            DistinguishedName = $createdAccount.DistinguishedName
+            SamAccountName = $createdAccount.SamAccountName
+            ObjectGUID = $createdAccount.ObjectGUID.ToString()
+            Created = $createdAccount.Created.ToString('yyyy-MM-dd HH:mm:ss')
+            Message = "gMSA created successfully"
+        }
     }
     
-    # Build parameters for New-ADServiceAccount
-    $gmsaParams = @{
-        Name = $accountName
-        DNSHostName = $dnsHostName
-        Credential = $domainCredential
-        Server = $domainController
-        Enabled = $true
-    }
+    # Execute the script block on the domain controller
+    Write-Log "Connecting to domain controller: $domainController"
+    Write-Log "Executing gMSA creation commands"
     
-    # Add optional parameters
-    if (-not [string]::IsNullOrWhiteSpace($description)) {
-        $gmsaParams['Description'] = $description
-    }
+    $result = Invoke-Command `
+        -ComputerName $domainController `
+        -Credential $domainCredential `
+        -ScriptBlock $scriptBlock `
+        -ArgumentList $accountName, $dnsHostName, $principalsAllowedToRetrieve, $description, $servicePrincipalNames, $organizationalUnit `
+        -ErrorAction Stop
     
-    if ($null -ne $principalsAllowedToRetrieve -and $principalsAllowedToRetrieve.Count -gt 0) {
-        $gmsaParams['PrincipalsAllowedToRetrieveManagedPassword'] = $principalsAllowedToRetrieve
-        Write-Log "Principals allowed to retrieve password: $($principalsAllowedToRetrieve -join ', ')"
-    }
+    Write-Log "gMSA operation completed successfully" -Level SUCCESS
     
-    if ($null -ne $servicePrincipalNames -and $servicePrincipalNames.Count -gt 0) {
-        $gmsaParams['ServicePrincipalNames'] = $servicePrincipalNames
-        Write-Log "Service Principal Names: $($servicePrincipalNames -join ', ')"
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($organizationalUnit)) {
-        $gmsaParams['Path'] = $organizationalUnit
-        Write-Log "Organizational Unit: $organizationalUnit"
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($kdsRootKeyId)) {
-        $gmsaParams['KerberosEncryptionType'] = 'AES128,AES256'
-        Write-Log "Using KDS Root Key: $kdsRootKeyId"
-    }
-    
-    # Create the gMSA
-    Write-Log "Creating gMSA: $accountName"
-    New-ADServiceAccount @gmsaParams -ErrorAction Stop
-    
-    Write-Log "gMSA '$accountName' created successfully!" -Level SUCCESS
-    
-    # Verify creation
-    Start-Sleep -Seconds 2
-    $createdAccount = Get-ADServiceAccount -Identity $accountName -Server $domainController  -Properties *
-    
-    if ($null -eq $createdAccount) {
-        Write-Log "Failed to verify gMSA creation" -Level ERROR
-        throw "gMSA creation verification failed"
-    }
-    
-    Write-Log "gMSA creation verified" -Level SUCCESS
-    
-    # Prepare success response
-    $result = @{
-        Status = "Success"
-        AccountName = $accountName
-        DNSHostName = $dnsHostName
-        DistinguishedName = $createdAccount.DistinguishedName
-        SamAccountName = $createdAccount.SamAccountName
-        ObjectGUID = $createdAccount.ObjectGUID.ToString()
-        Created = $createdAccount.Created
-        Message = "gMSA created successfully"
-        Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    }
+    # Add timestamp to result
+    $result['Timestamp'] = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     
     Write-Output "=========================================="
-    Write-Output "gMSA Creation Successful"
+    Write-Output "gMSA Creation Result"
     Write-Output "=========================================="
     Write-Output ($result | ConvertTo-Json -Depth 5)
     
