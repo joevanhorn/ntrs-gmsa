@@ -156,8 +156,7 @@ jobs:
     needs: terraform-plan
     if: |
       github.ref == 'refs/heads/main' && 
-      (github.event_name == 'push' || github.event.inputs.action == 'apply') &&
-      needs.terraform-plan.outputs.tfplanExitCode == '2'
+      (github.event_name == 'push' || github.event.inputs.action == 'apply')
     environment: 
       name: production
     
