@@ -228,18 +228,17 @@ jobs:
           echo "::add-mask::$WEBHOOK_URI"
           echo "webhook_uri=$WEBHOOK_URI" >> $GITHUB_OUTPUT
       
-      - name: Store Webhook URI in GitHub Secret
-        uses: actions/github-script@v7
-        env:
-          WEBHOOK_URI: ${{ steps.webhook.outputs.webhook_uri }}
+      - name: Save Webhook URI as Artifact
+        run: |
+          echo "${{ steps.webhook.outputs.webhook_uri }}" > webhook-uri.txt
+          echo "Webhook URI has been saved to artifact"
+
+      - name: Upload Webhook URI
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            await github.rest.actions.createOrUpdateRepoSecret({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              secret_name: 'AZURE_WEBHOOK_URI',
-              encrypted_value: process.env.WEBHOOK_URI
-            })
+          name: webhook-uri
+          path: webhook-uri.txt
+          retention-days: 90
       
       - name: Deployment Summary
         env:
