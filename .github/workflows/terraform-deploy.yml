@@ -230,14 +230,17 @@ jobs:
       
       - name: Save Webhook URI as Artifact
         run: |
+          cd ${{ github.workspace }}
           echo "${{ steps.webhook.outputs.webhook_uri }}" > webhook-uri.txt
-          echo "Webhook URI has been saved to artifact"
+          echo "File created at: $(pwd)/webhook-uri.txt"
+          ls -la webhook-uri.txt
+          cat webhook-uri.txt
 
       - name: Upload Webhook URI
         uses: actions/upload-artifact@v4
         with:
           name: webhook-uri
-          path: webhook-uri.txt
+          path: ${{ github.workspace }}/webhook-uri.txt
           retention-days: 90
       
       - name: Deployment Summary
